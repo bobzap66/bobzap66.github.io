@@ -131,6 +131,10 @@ jobs:
           path: site/golarion-calendar-diagnostic.txt
           retention-days: 1
 
+      - name: Remove case-variant publication alias redirects
+        run: |
+          rm -rf public/Lantern-and-Ledger public/Beacon-and-Bulletin
+
       - name: Canonicalize rendered note links
         run: node scripts/canonicalize-built-note-links.mjs
 
