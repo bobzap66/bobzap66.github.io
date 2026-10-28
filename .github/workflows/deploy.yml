@@ -1,0 +1,167 @@
+name: Deploy Greene Gaming to GitHub Pages
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - vault-updated
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: site
+
+    steps:
+      - name: Checkout Quartz site engine
+        uses: actions/checkout@v7
+        with:
+          repository: bobzap66/lantern-and-ledger
+          ref: main
+          path: site
+          fetch-depth: 0
+
+      - name: Checkout Obsidian vault
+        uses: actions/checkout@v7
+        with:
+          repository: bobzap66/inner-sea-region-vault
+          ref: main
+          path: site/content
+          fetch-depth: 0
+          token: ${{ secrets.VAULT_TOKEN }}
+
+      - name: Normalize vault note links
+        run: node scripts/normalize-vault-note-links.mjs
+
+      - name: Check vault link conventions
+        run: node scripts/check-link-conventions.mjs
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Quartz plugins
+        run: npx quartz plugin install --from-config --clean
+
+      - name: Check types
+        run: npm run typecheck
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Check image metadata accessibility
+        run: node scripts/check-image-accessibility.mjs content
+
+      - name: Validate campaign image derivatives
+        run: node scripts/normalize-campaign-images.mjs content
+
+      - name: Pin Explorer subdirectory navigation fix
+        run: |
+          npm install --no-save github:quartz-community/explorer#07de53f210f86287f41f0b349271c036bdc0b7c4
+          npm install --no-save @quartz-community/utils@0.1.1
+
+      - name: Normalize content asset paths
+        run: node scripts/normalize-content-asset-paths.mjs
+
+      - name: Expand folder galleries
+        run: node scripts/expand-folder-galleries.mjs
+
+      - name: Generate homepage recent notes
+        run: node scripts/generate-homepage-recents.mjs
+
+      - name: Generate spoiler-free article archive
+        run: node scripts/generate-public-articles.mjs content
+
+      - name: Generate calendar campaign index
+        run: node scripts/generate-calendar-campaign-index.mjs content
+
+      - name: Generate campaign directory and archive
+        run: node scripts/generate-campaign-directory.mjs content
+
+      - name: Generate vignette counts
+        run: node scripts/generate-vignette-counts.mjs content
+
+      - name: Build Quartz
+        run: npx quartz build
+
+      - name: Generate Golarion calendar data
+        run: node scripts/generate-golarion-calendar.mjs
+
+      - name: Generate Beacon & Bulletin timeline data
+        run: node scripts/generate-beacon-and-bulletin-timeline.mjs content
+
+      - name: Generate Beacon & Bulletin calendar data
+        run: node scripts/generate-beacon-and-bulletin-calendar.mjs content
+
+      - name: Copy theme ornament assets
+        run: |
+          mkdir -p public/ornaments
+          cp quartz/static/ornaments/*.svg public/ornaments/ 2>/dev/null || true
+          cp quartz/static/ornaments/*.webp public/ornaments/ 2>/dev/null || true
+          echo "Published theme ornaments:"
+          ls -la public/ornaments/
+
+      - name: Merge campaign timeline metadata
+        run: node scripts/merge-golarion-timeline-metadata.mjs
+
+      - name: Diagnose Golarion calendar data
+        run: node scripts/diagnose-golarion-calendar.mjs | tee golarion-calendar-diagnostic.txt
+
+      - name: Upload calendar diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: golarion-calendar-diagnostic
+          path: site/golarion-calendar-diagnostic.txt
+          retention-days: 1
+
+      - name: Canonicalize rendered note links
+        run: node scripts/canonicalize-built-note-links.mjs
+
+      - name: Check internal links
+        run: node scripts/check-built-links.mjs
+
+      - name: Externalize published assets to R2
+        env:
+          PUBLIC_ASSET_BASE_URL: https://pub-1a4993afa4544a3195fc51c9ddfa25a8.r2.dev
+        run: node scripts/externalize-published-images.mjs public
+
+      - name: Check Pages artifact size
+        run: node scripts/check-pages-artifact-size.mjs public
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
