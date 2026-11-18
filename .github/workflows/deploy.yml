@@ -1,5 +1,5 @@
 name: Deploy Greene Gaming to GitHub Pages
-# Publication refresh: Curtain Call six-character roster (2026-11-12).
+# Publication refresh: repair campaign asset and music links (2026-11-18).
 
 on:
   push:
